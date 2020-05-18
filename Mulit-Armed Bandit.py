@@ -1,4 +1,3 @@
-```python
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -103,4 +102,3 @@ if __name__ == '__main__':
     k_gamble.plot(colors='g', policy='ucb',hyper=6)
     plt.show()
 
-```
