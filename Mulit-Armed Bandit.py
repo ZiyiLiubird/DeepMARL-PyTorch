@@ -4,27 +4,27 @@ import matplotlib.pyplot as plt
 
 class KB_Game:
     def __init__(self, *args, **kwargs):
-        self.q = np.array([0.0, 0.0, 0.0])
-        self.action_counts = np.array([0, 0, 0])
-        self.current_cumulative_rewards = 0.0
-        self.actions = [1, 2, 3]
-        self.counts = 0
-        self.counts_history = []
-        self.cumulative_rewards_history = []
-        self.a = 1
-        self.reward = 0
+        self.q = np.array([0.0, 0.0, 0.0])  # 每个臂的平均回报，初始值设为0
+        self.action_counts = np.array([0, 0, 0])  # 每个臂被摇动的次数
+        self.current_cumulative_rewards = 0.0  # 当前累积回报总和
+        self.actions = [1, 2, 3]  # 动作空间
+        self.counts = 0  # 玩家玩游戏的次数
+        self.counts_history = []  # 玩家玩游戏的次数记录
+        self.cumulative_rewards_history = []  # 累积奖励记录
+        self.a = 1  # 玩家的当前动作，随机化初始值
+        self.r = 0  # 当前回报
 
-    def step(self, a):
+    def step(self, a):  # 执行当前动作，得到的奖励
         r = 0
         if a == 1:
-            r = np.random.normal(1, 1)
+            r = np.random.normal(1, 1)  # 不同臂返回的奖励服从某个分布
         if a == 2:
             r = np.random.normal(2, 1)
         if a == 3:
             r = np.random.normal(1.5, 1)
         return r
 
-    def choose_action(self, policy, **kwargs):
+    def choose_action(self, policy, **kwargs):  # 按照不同的策略选择动作
         action = 0
         if policy == 'e_greedy':
             if np.random.random() < kwargs['epsilon']:
@@ -33,7 +33,7 @@ class KB_Game:
                 action = np.argmax(self.q) + 1
         if policy == 'ucb':
             c_ratio = kwargs['c_ratio']
-            if 0 in self.action_counts:
+            if 0 in self.action_counts:  # np.where(condition) 返回满足条件的元素的坐标，返回的是一个元组，里面有numpy数组
                 action = np.where(self.action_counts == 0)[0][0] + 1
             else:
                 value = self.q + c_ratio * np.sqrt(np.log(self.counts) / self.action_counts)
@@ -57,7 +57,6 @@ class KB_Game:
             if policy == 'boltzmann':
                 action = self.choose_action(policy, temperature=kwargs['temperature'])
             self.a = action
-            # print(self.a)
             self.r = self.step(self.a)
             self.counts += 1
             self.q[self.a-1] = (self.q[self.a-1] * self.action_counts[self.a-1] + self.r) / (
@@ -78,7 +77,7 @@ class KB_Game:
         self.counts_history = []
         self.cumulative_rewards_history = []
         self.a = 1
-        self.reward = 0
+        self.r = 0
 
     def plot(self,colors,policy,hyper):
         plt.figure(1)
@@ -101,4 +100,3 @@ if __name__ == '__main__':
     k_gamble.train(play_total=total, policy='ucb', c_ratio=6)
     k_gamble.plot(colors='g', policy='ucb',hyper=6)
     plt.show()
-
