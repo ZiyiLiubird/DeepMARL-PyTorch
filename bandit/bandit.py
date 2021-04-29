@@ -3,7 +3,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 '''
-ten actions,
+ten actions [0,1,...,9],
+and the reward of each action obey Gaussian distribution with a mean and 1 variance.
 '''
 np.random.seed(42)
 Q = np.zeros(10)
@@ -11,7 +12,6 @@ N = np.ones(10, dtype=np.float32)
 epoch = 1000
 episode = 100
 epsilon = 0.1
-lr = 0.1
 
 def bandit(a):
     reward = np.random.normal(a,1)
