@@ -31,6 +31,7 @@ for j in range(episode):
         action = policy()
         reward = bandit(action)
         Q[action] = Q[action] + 1 / N[action] *(reward - Q[action])
+        N[action] += 1
         rewards[j][i] = reward
     print("mean reward:{}".format(np.mean(rewards[j])))
 
