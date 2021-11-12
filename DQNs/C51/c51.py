@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-# from DeepRL_PyTorch.Distributional_RL.wrappers import SubprocVecEnv, wrap_cover
 from replay_memory import ReplayBuffer
 
 import random
@@ -27,10 +26,8 @@ LEARN_FREQ = 1
 N_ATOM = 51
 
 '''Environment Settings'''
-# N_ENVS = 16
 ENV_NAME = 'CartPole-v0'
 env = gym.make(ENV_NAME)
-# env = SubprocVecEnv([wrap_cover(ENV_NAME) for i in range(N_ENVS)])
 action_dim = env.action_space.n
 obs_dim = env.observation_space.shape[0]
 print(f'obs_dim: {obs_dim}')
@@ -225,7 +222,6 @@ for epoch in range(1, STEP_NUM + 1):
         dqn.store_transition(obs, action, reward, obs_next, done)
         
         obs = obs_next
-    # if memory fill 50K and mod 4 = 0(for speed issue), learn pred net
         if (LEARN_START <= dqn.memory_counter) and (dqn.memory_counter % LEARN_FREQ == 0):
             dqn.learn()
 
@@ -237,10 +233,8 @@ for epoch in range(1, STEP_NUM + 1):
     print(f'cumulative rewards: {r}')
     results.append(r)
     if epoch <= int(150):
-            # linear annealing to 0.9 until million step
         epsilon -= 0.8/150
     elif epoch <= int(200):
-        # linear annealing to 0.09 until the end
         epsilon -= 0.09/50
 
 test(env, dqn)
