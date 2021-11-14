@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 ten actions [0,1,...,9],
 and the reward of each action obey Gaussian distribution with a mean and 1 variance.
 '''
+
 np.random.seed(42)
 Q = np.zeros(10)
 N = np.ones(10, dtype=np.float32)
