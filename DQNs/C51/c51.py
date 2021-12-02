@@ -3,7 +3,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from replay_memory import ReplayBuffer
+import os
+from os.path import dirname
+import sys
+
+path = dirname(dirname(dirname(os.path.abspath(__file__))))
+sys.path.append(path)
+
+from utils import ReplayBuffer
 
 import random
 import os
