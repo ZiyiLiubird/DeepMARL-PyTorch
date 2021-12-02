@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+from torch._C import device
 import torch.nn as nn
 import torch.nn.functional as F
 import argparse
@@ -25,43 +26,53 @@ def target_update(target_net:nn.Module, pred_net:nn.Module, tau:float):
 
 
 class Critic(nn.Module):
-    def __init__(self, obs_dim, act_dim, q_num):
+    def __init__(self, obs_dim, act_dim, q_num, N):
         super(Critic, self).__init__()
         self.obs_dim = obs_dim
         self.act_dim = act_dim
+        self.N = N
         self.q_num = q_num
         self.fc1 = nn.Linear(self.obs_dim, 512)
-        self.fc2 = nn.Linear(512, 128)
-        self.fc3 = nn.Linear(128, self.act_dim * self.q_num)
+        self.fc2 = nn.Linear(512, 256)
+        self.fc3 = nn.Linear(256, self.act_dim)
+        self.tau_embedding = nn.Linear(self.N, 256, bias=False)
+        self.phi_bias = nn.Parameter(torch.zeros(self.q_num))
 
 
-    def forward(self, x):
-        
+    def forward(self, x, tau=None):
+
         x = x.view(-1, self.obs_dim)
         mb = x.shape[0]
         x = self.fc1(x)
         x = F.relu(x)
         x = self.fc2(x)
         x = F.relu(x)
-        x = self.fc3(x).view(mb, self.act_dim, self.q_num)
-        return x
+        if tau == None:
+            tau = torch.rand(self.q_num, 1).cuda()
+        quants = torch.arange(0, self.N, 1.0).cuda()
+        cos_trans = torch.cos(tau * quants * np.pi) # (quants, N)
+        phi = F.relu(self.tau_embedding(cos_trans) + self.phi_bias.unsqueeze(1)).unsqueeze(0) # (1, quants, 256)
+        x = x.view(mb, -1).unsqueeze(1) # (mb, 1, 256)
+        x = F.relu(x * phi)
+        x = self.fc3(x) # (mb, quants, act_dim)
+        return x, tau
 
 
 
-class QR_DQN:
+class IQN:
 
-    def __init__(self, obs_dim, act_dim, quantiles_target, device, args):
+    def __init__(self, obs_dim, act_dim, device, args):
         self.obs_dim = obs_dim
         self.act_dim = act_dim
         self.lr = args.lr
         self.q_num = args.q_num
+        self.N = args.N
         self.gamma = args.gamma
         self.batch_size = args.batch_size
         self.tau = args.tau
         self.device = device
-        self.quantiles_target = quantiles_target
         self.memory_capacity = args.memory_capacity
-        self.pred_net, self.target_net = Critic(obs_dim, act_dim, self.q_num).to(device), Critic(obs_dim, act_dim, self.q_num).to(device)
+        self.pred_net, self.target_net = Critic(obs_dim, act_dim, self.q_num, self.N).to(device), Critic(obs_dim, act_dim, self.q_num, self.N).to(device)
         target_update(self.target_net, self.pred_net, self.tau)
         self.optimizer = torch.optim.Adam(self.pred_net.parameters(), lr=self.lr)
         self.replay_buffer = ReplayBuffer(self.memory_capacity)
@@ -74,8 +85,8 @@ class QR_DQN:
         mb = state.shape[0]
         if np.random.uniform() > epsilon:
         
-            action_value_ = self.pred_net(state)
-            action_value = torch.mean(action_value_, dim=2)
+            action_value_, tau = self.pred_net(state)
+            action_value = torch.mean(action_value_, dim=1)
             action = torch.argmax(action_value, dim=-1).data.cpu().numpy().item()
 
         else:
@@ -97,17 +108,18 @@ class QR_DQN:
         obs_nexts = torch.FloatTensor(obs_nexts).to(self.device)
         dones = torch.FloatTensor(dones).to(self.device)
 
-        q_eval = self.pred_net(obses)
+        q_eval, q_eval_tau = self.pred_net(obses)
         mb_size = q_eval.shape[0]
-        q_eval = torch.stack([q_eval[i].index_select(0, acts[i]) for i in range(mb_size)]).squeeze(1)
+        q_eval = torch.stack([q_eval[i].index_select(1, acts[i]) for i in range(mb_size)]).squeeze(2)
         # (m, q_num)
         q_eval = q_eval.unsqueeze(2)
         # (m, q_num, 1) dim 1 is present quantiles, 2 is target
 
         # get next state values
-        q_next = self.target_net(obs_nexts).detach()
-        best_actions = q_next.mean(dim=2).argmax(dim=1)
-        q_next = torch.stack([q_next[i].index_select(0, best_actions[i]) for i in range(mb_size)]).squeeze(1)
+        q_next, q_next_tau = self.target_net(obs_nexts, q_eval_tau)
+        q_next = q_next.detach()
+        best_actions = q_next.mean(dim=1).argmax(dim=1)
+        q_next = torch.stack([q_next[i].index_select(1, best_actions[i]) for i in range(mb_size)]).squeeze(2)
         # (m, q_num)
         q_target = rews.unsqueeze(1) + self.gamma * (1 - dones.unsqueeze(1)) * q_next
         q_target = q_target.unsqueeze(1)
@@ -116,7 +128,7 @@ class QR_DQN:
         # quantile huber loss
         u = q_target.detach() - q_eval
         # (m, q_num, q_num)
-        tau = torch.FloatTensor(self.quantiles_target).to(self.device).view(1, -1, 1)
+        tau = q_eval_tau.unsqueeze(0)
         weight = torch.abs(tau - u.le(0.).float())
         loss = F.smooth_l1_loss(q_eval, q_target.detach(), reduction='none')
         loss = torch.mean(weight * loss, dim=-1).mean(dim=-1)
@@ -140,19 +152,16 @@ class QR_DQN:
 def train(args):
     env_name = args.env_name
     learn_start = args.learn_start
-    q_num = args.q_num
     epoch = args.epoch
     epsilon = args.epsilon
     seed = args.seed
     np.random.seed(seed)
     torch.manual_seed(seed)
     env = gym.make(env_name)
-    quantiles = np.linspace(0.0, 1.0, q_num + 1)[1: ]
-    quantiles_target = (np.linspace(0.0, 1.0, q_num + 1)[: -1] + quantiles) / 2.
     action_dim = env.action_space.n
     obs_dim = env.observation_space.shape[0]
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    agent = QR_DQN(obs_dim=obs_dim, act_dim=action_dim, quantiles_target=quantiles_target, device=device, args=args)
+    agent = IQN(obs_dim=obs_dim, act_dim=action_dim, device=device, args=args)
 
     Gt = []
     cnt = 0
@@ -179,6 +188,7 @@ def train(args):
         else:
             epsilon -= 0.19/(epoch * 0.25)
         Gt.append(gt)
+        # print(f'average rewards: {np.mean(Gt)}')
     vis(Gt, env_name)
 
 
@@ -186,12 +196,12 @@ def vis(Gt, env_name="CartPole-v0"):
     plt.plot(Gt)
     plt.xlabel("episodes")
     plt.ylabel("cumulative rewards")
-    plt.title(f"QR-DQN-{env_name}")
+    plt.title(f"IQN-{env_name}")
     plt.legend()
-    plt.savefig(f"QR-DQN-{env_name}.png", dpi=300)
+    plt.savefig(f"IQN-{env_name}-same_tau2.png", dpi=300)
 
 
-def test(agent: QR_DQN, env, render=False):
+def test(agent: IQN, env, render=False):
 
     epsilon = 0.01
     Gt = []
@@ -220,12 +230,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--lr', default=0.001, type=float)
     parser.add_argument('--env_name', default="CartPole-v0", type=str)
-    parser.add_argument('--q_num', default=200, type=int)
+    parser.add_argument('--q_num', default=128, type=int)
     parser.add_argument('--learn_start', default=int(1e3), type=int)
     parser.add_argument('--memory_capacity', default=int(1e5), type=int)
     parser.add_argument('--learn_freq', default=4, type=int)
     parser.add_argument('--gamma', default=0.99, type=float)
-    parser.add_argument('--epoch', default=200, type=int)
+    parser.add_argument('--epoch', default=300, type=int)
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--batch_size', default=64, type=int)
     parser.add_argument('--epsilon', default=1.0, type=float)
@@ -233,8 +243,10 @@ if __name__ == '__main__':
     parser.add_argument('--load', action='store_true')
     parser.add_argument('--tau', default=0.01, type=float)
     parser.add_argument('--capacity', default=int(1e5), type=int)
-    parser.add_argument('--c', default=10.0, type=float)
-    args = parser.parse_args()
+    parser.add_argument('--N', default=64, type=int)
 
+
+    args = parser.parse_args()
+    
     train(args)
 
