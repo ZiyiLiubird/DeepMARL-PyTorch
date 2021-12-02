@@ -48,10 +48,10 @@ class Critic(nn.Module):
         x = self.fc2(x)
         x = F.relu(x)
         if tau == None:
-            tau = torch.rand(self.q_num, 1).cuda()
+            tau = torch.rand(mb, self.q_num, 1).cuda()
         quants = torch.arange(0, self.N, 1.0).cuda()
         cos_trans = torch.cos(tau * quants * np.pi) # (quants, N)
-        phi = F.relu(self.tau_embedding(cos_trans) + self.phi_bias.unsqueeze(1)).unsqueeze(0) # (1, quants, 256)
+        phi = F.relu(self.tau_embedding(cos_trans) + self.phi_bias.unsqueeze(1)) # (mb, quants, 256)
         x = x.view(mb, -1).unsqueeze(1) # (mb, 1, 256)
         x = F.relu(x * phi)
         x = self.fc3(x) # (mb, quants, act_dim)
