@@ -122,7 +122,7 @@ class BaseAgent(ABC):
         # Act withoud randomness
         state = torch.FloatTensor(state).view(-1, self.obs_dim).to(self.device)
         with torch.no_grad():
-            action = self.online_net.calculate_q(state).argmax().item()
+            action = self.online_net.calculate_q(states=state).argmax().item()
         return action
 
     @abstractmethod

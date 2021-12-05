@@ -91,3 +91,44 @@ class QuantileNetwork(nn.Module):
         quantiles = self.net(embeddings)
 
         return quantiles.view(batch_size, N, self.act_dim)
+
+
+class FractionProposalNetwork(nn.Module):
+
+    def __init__(self, N=32, embedding_dim=512):
+        super(FractionProposalNetwork, self).__init__()
+
+        self.net = nn.Sequential(
+            nn.Linear(embedding_dim, N)
+        )
+
+        self.N = N
+        self.embedding_dim = embedding_dim
+
+    def forward(self, state_embeddings):
+
+        batch_size = state_embeddings.shape[0]
+
+        # Calculate (log of) probabilities q_i in the paper.
+        log_probs = F.log_softmax(self.net(state_embeddings), dim=1)
+        probs = log_probs.exp()
+        assert probs.shape == (batch_size, self.N)
+
+        tau_0 = torch.zeros(
+            (batch_size, 1), dtype=state_embeddings.dtype,
+            device=state_embeddings.device)
+        taus_1_N = torch.cumsum(probs, dim=1)
+
+        # Calculate \tau_i (i=0,...,N).
+        taus = torch.cat((tau_0, taus_1_N), dim=1)
+        assert taus.shape == (batch_size, self.N+1)
+
+        # Calculate \hat \tau_i (i=0,...,N-1).
+        tau_hats = (taus[:, :-1] + taus[:, 1:]).detach() / 2.
+        assert tau_hats.shape == (batch_size, self.N)
+
+        # Calculate entropies of value distributions.
+        entropies = -(log_probs * probs).sum(dim=-1, keepdim=True)
+        assert entropies.shape == (batch_size, 1)
+
+        return taus, tau_hats, entropies
